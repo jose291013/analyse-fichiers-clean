@@ -76,7 +76,7 @@ function modifyEPS(filePath) {
 function convertEPStoPDF(inputEPS) {
   return new Promise((resolve, reject) => {
     const outputPDF = path.join(pdfDir, `${Date.now()}_converted.pdf`);
-    const command = `gswin64c -dNOPAUSE -dBATCH -dEPSCrop -sDEVICE=pdfwrite -sOutputFile="${outputPDF}" "${inputEPS}"`;
+    const command = `gs -dNOPAUSE -dBATCH -dEPSCrop -sDEVICE=pdfwrite -sOutputFile="${outputPDF}" "${inputEPS}"`;
     exec(command, (error) => {
       if (error) return reject(error);
       resolve(outputPDF);
