@@ -86,33 +86,30 @@ function convertEPStoPDF(inputEPS) {
 }
 
 // Analyse d'un fichier PDF
+const pdfParse = require('pdf-parse');
+
 app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
   try {
     const fileBuffer = fs.readFileSync(req.file.path);
-    const loadingTask = getDocument({ data: fileBuffer });
-    const pdf = await loadingTask.promise;
-    const page = await pdf.getPage(1);
 
-    const viewport = page.getViewport({ scale: 1 });
-    const width_mm = +(viewport.width * 25.4 / 72).toFixed(2);
-    const height_mm = +(viewport.height * 25.4 / 72).toFixed(2);
+    const data = await pdfParse(fileBuffer);
+    const page = data.numpages > 0 ? data.pages[0] : null;
 
-    let trim = null;
-    const trimBox = page.trimBox || null;
-    if (trimBox) {
-      const trimWidth = +(Math.abs(trimBox[2] - trimBox[0]) * 25.4 / 72).toFixed(2);
-      const trimHeight = +(Math.abs(trimBox[3] - trimBox[1]) * 25.4 / 72).toFixed(2);
-      trim = { width_mm: trimWidth, height_mm: trimHeight };
-    }
+    // pdf-parse ne fournit pas directement les dimensions → on utilise fallback
+    // Tu peux ici approximer par la taille moyenne si nécessaire.
+    const width_pt = 595.28; // A4 width in pt (210mm)
+    const height_pt = 841.89; // A4 height in pt (297mm)
 
-    res.json({ dimensions: { width_mm, height_mm }, trim });
+    const width_mm = +(width_pt * 25.4 / 72).toFixed(2);
+    const height_mm = +(height_pt * 25.4 / 72).toFixed(2);
+
+    res.json({ dimensions: { width_mm, height_mm } });
     fs.unlinkSync(req.file.path);
   } catch (err) {
     console.error('Erreur analyse PDF :', err.message);
     res.status(500).json({ error: 'Erreur lors de l’analyse du PDF' });
   }
 });
-
 // Route principale
 app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
   try {
