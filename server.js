@@ -89,55 +89,30 @@ function convertEPStoPDF(inputEPS) {
 app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
   try {
     const fileBuffer = fs.readFileSync(req.file.path);
-    const loadingTask = getDocument({ data: fileBuffer });
-    const pdf = await loadingTask.promise;
+    const pdfjs = require('pdfjs-dist');
+    
+    // Configuration du Worker si nécessaire
+    pdfjs.GlobalWorkerOptions.workerSrc = require.resolve('pdfjs-dist/build/pdf.worker.min.js');
+
+    const loadingTask = pdfjs.getDocument({ data: fileBuffer });
+    const pdf = await loadingTask.promise.catch(err => {
+      console.error('Erreur de chargement du PDF :', err);
+      throw new Error('Échec du chargement du PDF');
+    });
+
     const page = await pdf.getPage(1);
-
-    let width, height;
-
-    if (page.trimBox) {
-      const [x1, y1, x2, y2] = page.trimBox;
-      width = Math.abs(x2 - x1);
-      height = Math.abs(y2 - y1);
-    } else {
-      const viewport = page.getViewport({ scale: 1 });
-      width = viewport.width;
-      height = viewport.height;
-    }
-
+    const [x1, y1, x2, y2] = page.trimBox || page.mediaBox || [0, 0, page.view[2], page.view[3]];
+    
+    const width = Math.abs(x2 - x1);
+    const height = Math.abs(y2 - y1);
     const width_mm = +(width * 25.4 / 72).toFixed(2);
     const height_mm = +(height * 25.4 / 72).toFixed(2);
 
     res.json({ dimensions: { width_mm, height_mm } });
     fs.unlinkSync(req.file.path);
   } catch (err) {
-    console.error('Erreur analyse PDF :', err.message);
-    res.status(500).json({ error: 'Erreur lors de l’analyse du PDF' });
-  }
-});
-// Route principale
-app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
-  try {
-    const file = req.file;
-    const dimensions = analyzeEPS(file.path);
-    const modifiedFilePath = modifyEPS(file.path);
-
-    let pdfFilePath = null;
-    if (modifiedFilePath) {
-      pdfFilePath = await convertEPStoPDF(modifiedFilePath);
-    }
-
-    res.json({
-      dimensions,
-      modified: modifiedFilePath !== null,
-      downloadLink: modifiedFilePath ? `/download/eps/${path.basename(modifiedFilePath)}` : null,
-      pdfLink: pdfFilePath ? `/download/pdf/${path.basename(pdfFilePath)}` : null
-    });
-
-    fs.unlinkSync(file.path);
-  } catch (err) {
-    console.error('Erreur Ghostscript :', err.message);
-    res.status(500).json({ error: 'Erreur interne du serveur' });
+    console.error('Erreur analyse PDF :', err);
+    res.status(500).json({ error: 'Erreur lors de l’analyse du PDF', details: err.message });
   }
 });
 
