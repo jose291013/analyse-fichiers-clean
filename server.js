@@ -86,22 +86,27 @@ function convertEPStoPDF(inputEPS) {
 }
 
 // Analyse d'un fichier PDF
-const pdfParse = require('pdf-parse');
-
 app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
   try {
     const fileBuffer = fs.readFileSync(req.file.path);
+    const loadingTask = getDocument({ data: fileBuffer });
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
 
-    const data = await pdfParse(fileBuffer);
-    const page = data.numpages > 0 ? data.pages[0] : null;
+    let width, height;
 
-    // pdf-parse ne fournit pas directement les dimensions → on utilise fallback
-    // Tu peux ici approximer par la taille moyenne si nécessaire.
-    const width_pt = 595.28; // A4 width in pt (210mm)
-    const height_pt = 841.89; // A4 height in pt (297mm)
+    if (page.trimBox) {
+      const [x1, y1, x2, y2] = page.trimBox;
+      width = Math.abs(x2 - x1);
+      height = Math.abs(y2 - y1);
+    } else {
+      const viewport = page.getViewport({ scale: 1 });
+      width = viewport.width;
+      height = viewport.height;
+    }
 
-    const width_mm = +(width_pt * 25.4 / 72).toFixed(2);
-    const height_mm = +(height_pt * 25.4 / 72).toFixed(2);
+    const width_mm = +(width * 25.4 / 72).toFixed(2);
+    const height_mm = +(height * 25.4 / 72).toFixed(2);
 
     res.json({ dimensions: { width_mm, height_mm } });
     fs.unlinkSync(req.file.path);
