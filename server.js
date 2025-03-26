@@ -4,6 +4,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
+const { getDocument } = require('pdfjs-dist');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -83,6 +84,34 @@ function convertEPStoPDF(inputEPS) {
     });
   });
 }
+
+// Analyse d'un fichier PDF
+app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
+  try {
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const loadingTask = getDocument({ data: fileBuffer });
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+
+    const viewport = page.getViewport({ scale: 1 });
+    const width_mm = +(viewport.width * 25.4 / 72).toFixed(2);
+    const height_mm = +(viewport.height * 25.4 / 72).toFixed(2);
+
+    let trim = null;
+    const trimBox = page.trimBox || null;
+    if (trimBox) {
+      const trimWidth = +(Math.abs(trimBox[2] - trimBox[0]) * 25.4 / 72).toFixed(2);
+      const trimHeight = +(Math.abs(trimBox[3] - trimBox[1]) * 25.4 / 72).toFixed(2);
+      trim = { width_mm: trimWidth, height_mm: trimHeight };
+    }
+
+    res.json({ dimensions: { width_mm, height_mm }, trim });
+    fs.unlinkSync(req.file.path);
+  } catch (err) {
+    console.error('Erreur analyse PDF :', err.message);
+    res.status(500).json({ error: 'Erreur lors de l’analyse du PDF' });
+  }
+});
 
 // Route principale
 app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
