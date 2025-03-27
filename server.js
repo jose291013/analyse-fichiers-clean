@@ -90,16 +90,23 @@ const convertEPStoPDF = (inputEPS) => new Promise((resolve, reject) => {
   });
 });
 
-// 4. Analyse PDF avec pdf-lib
+// 4. Analyse PDF avec pdf-lib (avec logs supplémentaires)
 app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
   try {
     const pdfBytes = fs.readFileSync(req.file.path);
-    // Ajout de l'option ignoreEncryption pour gérer d'éventuels PDF chiffrés
-    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-    const page = pdfDoc.getPage(0);
+    console.log(`PDF lu avec succès (${pdfBytes.length} octets)`);
 
+    // Charger le PDF en ignorant le chiffrement
+    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    console.log("PDF chargé avec succès.");
+    
+    const pageCount = pdfDoc.getPageCount();
+    console.log(`Nombre de pages: ${pageCount}`);
+    if (pageCount === 0) throw new Error("Aucune page trouvée dans le PDF.");
+
+    const page = pdfDoc.getPage(0);
     // Priorité: TrimBox → MediaBox → Fallback A4
     const box = page.getTrimBox() || page.getMediaBox() || [0, 0, 595, 842];
     const [x1, y1, x2, y2] = box;
@@ -122,6 +129,7 @@ app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
     if (req.file?.path) fs.unlinkSync(req.file.path);
   }
 });
+
 
 // 5. Route EPS existante (optimisée)
 app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
