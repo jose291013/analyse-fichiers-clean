@@ -10,7 +10,11 @@ const { PDFDocument } = require('pdf-lib'); // Remplace pdfjs-dist
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Utilisation de CORS pour autoriser les requêtes cross-origin
 app.use(cors());
+
+// Base URL de votre service Render
+const baseUrl = process.env.BASE_URL || "https://analyse-fichiers-clean.onrender.com";
 
 // Configuration des répertoires
 const directories = [
@@ -134,8 +138,8 @@ app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
     res.json({
       dimensions,
       modified: !!modifiedPath,
-      downloadLink: modifiedPath ? `/download/eps/${path.basename(modifiedPath)}` : null,
-      pdfLink: pdfPath ? `/download/pdf/${path.basename(pdfPath)}` : null
+      downloadLink: modifiedPath ? `${baseUrl}/download/eps/${path.basename(modifiedPath)}` : null,
+      pdfLink: pdfPath ? `${baseUrl}/download/pdf/${path.basename(pdfPath)}` : null
     });
   } catch (err) {
     console.error('Erreur analyse EPS:', err);
