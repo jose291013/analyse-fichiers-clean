@@ -1,4 +1,5 @@
 // server.js - Version complète et corrigée
+// server.js - Version complète et corrigée
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -10,7 +11,6 @@ const { PDFDocument } = require('pdf-lib'); // Remplace pdfjs-dist
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Utilisation de CORS pour autoriser les requêtes cross-origin
 app.use(cors());
 
 // Base URL de votre service Render
@@ -90,13 +90,14 @@ const convertEPStoPDF = (inputEPS) => new Promise((resolve, reject) => {
   });
 });
 
-// 4. Nouvelle analyse PDF avec pdf-lib
+// 4. Analyse PDF avec pdf-lib
 app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
   try {
     const pdfBytes = fs.readFileSync(req.file.path);
-    const pdfDoc = await PDFDocument.load(pdfBytes);
+    // Ajout de l'option ignoreEncryption pour gérer d'éventuels PDF chiffrés
+    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
     const page = pdfDoc.getPage(0);
 
     // Priorité: TrimBox → MediaBox → Fallback A4
@@ -149,7 +150,7 @@ app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
   }
 });
 
-// Routes de téléchargement (inchangées)
+// Routes de téléchargement
 app.get('/download/eps/:fileName', (req, res) => {
   const filePath = path.join(__dirname, 'modified', req.params.fileName);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Fichier introuvable' });
