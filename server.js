@@ -1,5 +1,4 @@
 // server.js - Version complète et corrigée
-// server.js - Version complète et corrigée
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -90,35 +89,51 @@ const convertEPStoPDF = (inputEPS) => new Promise((resolve, reject) => {
   });
 });
 
-// 4. Analyse PDF avec pdf-lib (avec logs supplémentaires)
+// 4. Analyse PDF avec pdf-lib (mise à jour pour gérer le cas où la box n'est pas un tableau)
 app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
   try {
     const pdfBytes = fs.readFileSync(req.file.path);
     console.log(`PDF lu avec succès (${pdfBytes.length} octets)`);
-
+    
     // Charger le PDF en ignorant le chiffrement
     const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
     console.log("PDF chargé avec succès.");
     
-    const pageCount = pdfDoc.getPageCount();
-    console.log(`Nombre de pages: ${pageCount}`);
-    if (pageCount === 0) throw new Error("Aucune page trouvée dans le PDF.");
-
     const page = pdfDoc.getPage(0);
-    // Priorité: TrimBox → MediaBox → Fallback A4
-    const box = page.getTrimBox() || page.getMediaBox() || [0, 0, 595, 842];
-    const [x1, y1, x2, y2] = box;
+
     const toMM = (pt) => +((pt * 25.4 / 72).toFixed(2));
 
-    res.json({
-      dimensions: {
+    // Tentative d'utilisation de getTrimBox ou getMediaBox si disponibles et itérables
+    let box;
+    if (page.getTrimBox) {
+      box = page.getTrimBox();
+    }
+    if (!box && page.getMediaBox) {
+      box = page.getMediaBox();
+    }
+    
+    let dimensions, usedBox;
+    if (box && Array.isArray(box) && box.length === 4) {
+      const [x1, y1, x2, y2] = box;
+      dimensions = {
         width_mm: toMM(x2 - x1),
         height_mm: toMM(y2 - y1)
-      },
-      usedBox: page.getTrimBox() ? 'trimBox' : 'mediaBox'
-    });
+      };
+      usedBox = (page.getTrimBox ? 'trimBox' : 'mediaBox');
+    } else {
+      // Fallback sur la taille de la page
+      const { width, height } = page.getSize();
+      dimensions = {
+        width_mm: toMM(width),
+        height_mm: toMM(height)
+      };
+      usedBox = 'pageSize';
+      console.log("Utilisation de la taille de la page car aucune box valide n'a été trouvée.");
+    }
+    
+    res.json({ dimensions, usedBox });
   } catch (err) {
     console.error('Erreur analyse PDF:', err);
     res.status(500).json({ 
@@ -129,7 +144,6 @@ app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
     if (req.file?.path) fs.unlinkSync(req.file.path);
   }
 });
-
 
 // 5. Route EPS existante (optimisée)
 app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
