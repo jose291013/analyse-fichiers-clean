@@ -190,7 +190,7 @@ app.use((err, req, res, next) => {
   console.error('Erreur globale:', err);
   res.status(500).json({ error: 'Erreur interne du serveur' });
 });
-const { exec } = require('child_process');
+
 
 app.get('/test-qpdf', (req, res) => {
   exec('qpdf --version', (err, stdout) => {
