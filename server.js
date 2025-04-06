@@ -124,7 +124,9 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
       if (!pageData) {
         return res.status(500).json({ error: 'Objet page introuvable dans qpdf' });
       }
-
+      console.log("🧩 Contenu brut de pageData :");
+      console.log(JSON.stringify(pageData, null, 2));
+      
       let box, usedBox;
       if (Array.isArray(pageData.TrimBox)) {
         console.log('🔍 pageData complet =', JSON.stringify(pageData, null, 2));
