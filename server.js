@@ -109,8 +109,17 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
       const page = json.pages?.[0];
       if (!page) return res.status(500).json({ error: 'Aucune page trouvée' });
 
-      const box = page.trim_box || page.media_box;
-      const usedBox = page.trim_box ? 'TrimBox' : 'MediaBox';
+      let box, usedBox;
+
+      if (Array.isArray(page.trim_box)) {
+        box = page.trim_box;
+        usedBox = 'TrimBox';
+      } else if (Array.isArray(page.media_box)) {
+        box = page.media_box;
+        usedBox = 'MediaBox';
+      } else {
+        return res.status(500).json({ error: 'Aucune box valide trouvée dans le PDF' });
+      }
 
       const [x1, y1, x2, y2] = box;
       const toMM = pt => +(pt * 25.4 / 72).toFixed(2);
@@ -121,12 +130,14 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
       };
 
       res.json({ dimensions, usedBox });
+
     } catch (parseErr) {
       console.error('Erreur parsing JSON qpdf:', parseErr);
       res.status(500).json({ error: 'Erreur parsing JSON qpdf' });
     }
   });
 });
+
 
 
 // 5. Route EPS existante (optimisée)
