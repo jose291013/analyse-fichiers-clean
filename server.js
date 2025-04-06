@@ -5,7 +5,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
-const { PDFDocument } = require('pdf-lib'); // Remplace pdfjs-dist
+
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -89,61 +89,45 @@ const convertEPStoPDF = (inputEPS) => new Promise((resolve, reject) => {
   });
 });
 
-// 4. Analyse PDF avec pdf-lib (mise à jour pour gérer le cas où la box n'est pas un tableau)
-app.post('/analyze-pdf', upload.single('FILE'), async (req, res) => {
+// 4. Analyse PDF avec qpdf pour lire le TrimBox ou MediaBox
+app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
-  try {
-    const pdfBytes = fs.readFileSync(req.file.path);
-    console.log(`PDF lu avec succès (${pdfBytes.length} octets)`);
-    
-    // Charger le PDF en ignorant le chiffrement
-    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-    console.log("PDF chargé avec succès.");
-    
-    const page = pdfDoc.getPage(0);
+  const filePath = req.file.path;
+  const command = `qpdf --json "${filePath}"`;
 
-    const toMM = (pt) => +((pt * 25.4 / 72).toFixed(2));
+  exec(command, (err, stdout, stderr) => {
+    fs.unlinkSync(filePath); // Nettoyage du fichier temporaire
 
-    // Tentative d'utilisation de getTrimBox ou getMediaBox si disponibles et itérables
-    let box;
-    if (page.getTrimBox) {
-      box = page.getTrimBox();
+    if (err) {
+      console.error('Erreur qpdf :', stderr);
+      return res.status(500).json({ error: 'Erreur lors de l’analyse PDF avec qpdf' });
     }
-    if (!box && page.getMediaBox) {
-      box = page.getMediaBox();
-    }
-    
-    let dimensions, usedBox;
-    if (box && Array.isArray(box) && box.length === 4) {
+
+    try {
+      const json = JSON.parse(stdout);
+      const page = json.pages?.[0];
+      if (!page) return res.status(500).json({ error: 'Aucune page trouvée' });
+
+      const box = page.trim_box || page.media_box;
+      const usedBox = page.trim_box ? 'TrimBox' : 'MediaBox';
+
       const [x1, y1, x2, y2] = box;
-      dimensions = {
+      const toMM = pt => +(pt * 25.4 / 72).toFixed(2);
+
+      const dimensions = {
         width_mm: toMM(x2 - x1),
         height_mm: toMM(y2 - y1)
       };
-      usedBox = (page.getTrimBox ? 'trimBox' : 'mediaBox');
-    } else {
-      // Fallback sur la taille de la page
-      const { width, height } = page.getSize();
-      dimensions = {
-        width_mm: toMM(width),
-        height_mm: toMM(height)
-      };
-      usedBox = 'pageSize';
-      console.log("Utilisation de la taille de la page car aucune box valide n'a été trouvée.");
+
+      res.json({ dimensions, usedBox });
+    } catch (parseErr) {
+      console.error('Erreur parsing JSON qpdf:', parseErr);
+      res.status(500).json({ error: 'Erreur parsing JSON qpdf' });
     }
-    
-    res.json({ dimensions, usedBox });
-  } catch (err) {
-    console.error('Erreur analyse PDF:', err);
-    res.status(500).json({ 
-      error: 'Erreur traitement PDF',
-      details: err.message 
-    });
-  } finally {
-    if (req.file?.path) fs.unlinkSync(req.file.path);
-  }
+  });
 });
+
 
 // 5. Route EPS existante (optimisée)
 app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
