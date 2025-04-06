@@ -1,6 +1,7 @@
 FROM node:18-slim
 
-RUN apt-get update && apt-get install -y qpdf && apt-get clean
+RUN apt-get update && apt-get install -y qpdf ghostscript && apt-get clean
+
 
 WORKDIR /app
 
