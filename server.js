@@ -107,15 +107,24 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
     try {
       const json = JSON.parse(stdout);
 
-      // 🔍 Trouver l'objet de la première page (ex: "5 0 R")
       const pageRef = json.pages?.[0]?.object;
-      const pageData = json.qpdf?.find(obj => obj[`obj:${pageRef}`])?.[`obj:${pageRef}`]?.value;
+      if (!pageRef) return res.status(500).json({ error: 'Référence page introuvable' });
+
+      let pageData;
+
+      // ✅ Correction : parcourir tous les objets de json.qpdf
+      for (const obj of json.qpdf) {
+        const key = `obj:${pageRef}`;
+        if (obj[key]) {
+          pageData = obj[key].value;
+          break;
+        }
+      }
 
       if (!pageData) {
         return res.status(500).json({ error: 'Objet page introuvable dans qpdf' });
       }
 
-      // 📦 Lire le TrimBox ou MediaBox dans les données de l'objet
       let box, usedBox;
       if (Array.isArray(pageData.TrimBox)) {
         box = pageData.TrimBox;
@@ -143,9 +152,6 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
     }
   });
 });
-
-
-
 
 // 5. Route EPS existante (optimisée)
 app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
