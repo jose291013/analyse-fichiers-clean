@@ -190,6 +190,17 @@ app.use((err, req, res, next) => {
   console.error('Erreur globale:', err);
   res.status(500).json({ error: 'Erreur interne du serveur' });
 });
+const { exec } = require('child_process');
+
+app.get('/test-qpdf', (req, res) => {
+  exec('qpdf --version', (err, stdout) => {
+    if (err) {
+      console.error('❌ qpdf non trouvé');
+      return res.status(500).json({ error: 'qpdf non installé' });
+    }
+    res.json({ version: stdout.trim() });
+  });
+});
 
 app.listen(port, () => {
   console.log(`🛠️ Serveur prêt sur le port ${port}`);
