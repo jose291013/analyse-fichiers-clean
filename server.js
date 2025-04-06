@@ -128,17 +128,16 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
       console.log(JSON.stringify(pageData, null, 2));
       
       let box, usedBox;
-      if (Array.isArray(pageData.TrimBox)) {
-        console.log('🔍 pageData complet =', JSON.stringify(pageData, null, 2));
+if (Array.isArray(pageData["/TrimBox"])) {
+  box = pageData["/TrimBox"];
+  usedBox = 'TrimBox';
+} else if (Array.isArray(pageData["/MediaBox"])) {
+  box = pageData["/MediaBox"];
+  usedBox = 'MediaBox';
+} else {
+  return res.status(500).json({ error: 'Aucune box valide trouvée dans le PDF' });
+}
 
-        box = pageData.TrimBox;
-        usedBox = 'TrimBox';
-      } else if (Array.isArray(pageData.MediaBox)) {
-        box = pageData.MediaBox;
-        usedBox = 'MediaBox';
-      } else {
-        return res.status(500).json({ error: 'Aucune box valide trouvée dans le PDF' });
-      }
 
       const [x1, y1, x2, y2] = box;
       const toMM = pt => +(pt * 25.4 / 72).toFixed(2);
