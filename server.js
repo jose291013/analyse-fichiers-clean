@@ -127,6 +127,8 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
 
       let box, usedBox;
       if (Array.isArray(pageData.TrimBox)) {
+        console.log('🔍 pageData complet =', JSON.stringify(pageData, null, 2));
+
         box = pageData.TrimBox;
         usedBox = 'TrimBox';
       } else if (Array.isArray(pageData.MediaBox)) {
