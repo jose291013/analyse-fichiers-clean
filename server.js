@@ -202,6 +202,7 @@ app.get('/test-qpdf', (req, res) => {
   });
 });
 
+
 app.listen(port, () => {
   console.log(`🛠️ Serveur prêt sur le port ${port}`);
   console.log(`📁 Répertoires vérifiés: ${directories.join(', ')}`);
