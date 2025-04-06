@@ -106,17 +106,22 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
 
     try {
       const json = JSON.parse(stdout);
-      console.log("🧩 JSON brut qpdf:", JSON.stringify(json, null, 2));
-      const page = json.pages?.[0];
-      if (!page) return res.status(500).json({ error: 'Aucune page trouvée' });
 
+      // 🔍 Trouver l'objet de la première page (ex: "5 0 R")
+      const pageRef = json.pages?.[0]?.object;
+      const pageData = json.qpdf?.find(obj => obj[`obj:${pageRef}`])?.[`obj:${pageRef}`]?.value;
+
+      if (!pageData) {
+        return res.status(500).json({ error: 'Objet page introuvable dans qpdf' });
+      }
+
+      // 📦 Lire le TrimBox ou MediaBox dans les données de l'objet
       let box, usedBox;
-
-      if (Array.isArray(page.trim_box)) {
-        box = page.trim_box;
+      if (Array.isArray(pageData.TrimBox)) {
+        box = pageData.TrimBox;
         usedBox = 'TrimBox';
-      } else if (Array.isArray(page.media_box)) {
-        box = page.media_box;
+      } else if (Array.isArray(pageData.MediaBox)) {
+        box = pageData.MediaBox;
         usedBox = 'MediaBox';
       } else {
         return res.status(500).json({ error: 'Aucune box valide trouvée dans le PDF' });
@@ -138,6 +143,7 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
     }
   });
 });
+
 
 
 
