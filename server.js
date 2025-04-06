@@ -106,6 +106,7 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
 
     try {
       const json = JSON.parse(stdout);
+      console.log("🧩 JSON brut qpdf:", JSON.stringify(json, null, 2));
       const page = json.pages?.[0];
       if (!page) return res.status(500).json({ error: 'Aucune page trouvée' });
 
