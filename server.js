@@ -7,17 +7,31 @@ const path = require('path');
 const { exec } = require('child_process');
 
 // Fonction pour générer une miniature d'un EPS en PNG en utilisant Ghostscript
+// Fonction pour générer une miniature d'un EPS en PNG recadré (rogne l'espace blanc)
+// Utilise Ghostscript pour générer un PNG temporaire avec -dEPSCrop, puis ImageMagick pour le trimming.
 const generateThumbnail = (inputEPS, outputImage) => new Promise((resolve, reject) => {
-  // Commande Ghostscript pour convertir la première page de l'EPS en PNG
-  const cmd = `gs -dNOPAUSE -dBATCH -sDEVICE=pngalpha -r150 -dFirstPage=1 -dLastPage=1 -sOutputFile="${outputImage}" "${inputEPS}"`;
-  exec(cmd, (error, stdout, stderr) => {
+  // Définir un chemin temporaire en remplaçant _thumb.png par _temp.png dans le nom de sortie
+  const tempImage = outputImage.replace('_thumb.png', '_temp.png');
+
+  // Étape 1 : Génération du PNG temporaire avec Ghostscript (en tenant compte de la bounding box)
+  const gsCommand = `gs -dNOPAUSE -dBATCH -dEPSCrop -sDEVICE=pngalpha -r150 -dFirstPage=1 -dLastPage=1 -sOutputFile="${tempImage}" "${inputEPS}"`;
+  exec(gsCommand, (error, stdout, stderr) => {
     if (error) {
-      console.error("Erreur lors de la génération du thumbnail :", stderr);
-      return reject(new Error("Échec génération thumbnail"));
+      console.error("Erreur Ghostscript:", stderr);
+      return reject(new Error("Échec génération temporaire du thumbnail"));
     }
-    resolve(outputImage);
+    // Étape 2 : Rogner le PNG temporaire avec ImageMagick pour supprimer les espaces blancs
+    const convertCommand = `convert "${tempImage}" -trim +repage "${outputImage}" && rm "${tempImage}"`;
+    exec(convertCommand, (err2, stdout2, stderr2) => {
+      if (err2) {
+        console.error("Erreur ImageMagick:", stderr2);
+        return reject(new Error("Échec du trimming avec ImageMagick"));
+      }
+      resolve(outputImage);
+    });
   });
 });
+
 
 const app = express();
 const port = process.env.PORT || 3000;
