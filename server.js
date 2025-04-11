@@ -156,7 +156,7 @@ if (Array.isArray(pageData["/TrimBox"])) {
   });
 });
 
-// 5. Route EPS existante (optimisée)
+// 5. Route EPS existante (optimisée) avec génération d'une miniature
 app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
@@ -164,16 +164,30 @@ app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
     const dimensions = analyzeEPS(req.file.path);
     const modifiedPath = modifyEPS(req.file.path);
     let pdfPath = null;
+    let thumbnailPath = null;
 
     if (modifiedPath) {
       pdfPath = await convertEPStoPDF(modifiedPath).catch(console.error);
     }
 
+    // Préparation du dossier pour les miniatures (si inexistant, on le crée)
+    const thumbnailsDir = path.join(__dirname, 'thumbnails');
+    if (!fs.existsSync(thumbnailsDir)) {
+      fs.mkdirSync(thumbnailsDir, { recursive: true });
+    }
+
+    // Définir le nom du fichier thumbnail (ici basé sur un timestamp)
+    thumbnailPath = path.join(thumbnailsDir, `${Date.now()}_thumb.png`);
+
+    // Génération du thumbnail à partir du fichier EPS original
+    await generateThumbnail(req.file.path, thumbnailPath);
+
     res.json({
       dimensions,
       modified: !!modifiedPath,
       downloadLink: modifiedPath ? `${baseUrl}/download/eps/${path.basename(modifiedPath)}` : null,
-      pdfLink: pdfPath ? `${baseUrl}/download/pdf/${path.basename(pdfPath)}` : null
+      pdfLink: pdfPath ? `${baseUrl}/download/pdf/${path.basename(pdfPath)}` : null,
+      thumbnailLink: thumbnailPath ? `${baseUrl}/download/thumbnail/${path.basename(thumbnailPath)}` : null
     });
   } catch (err) {
     console.error('Erreur analyse EPS:', err);
@@ -182,6 +196,12 @@ app.post('/analyze-eps', upload.single('FILE'), async (req, res) => {
     if (req.file?.path) fs.unlinkSync(req.file.path);
   }
 });
+app.get('/download/thumbnail/:fileName', (req, res) => {
+  const filePath = path.join(__dirname, 'thumbnails', req.params.fileName);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Fichier miniature introuvable' });
+  res.download(filePath);
+});
+
 
 // Routes de téléchargement
 app.get('/download/eps/:fileName', (req, res) => {
