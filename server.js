@@ -6,11 +6,24 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
+// Fonction pour générer une miniature d'un EPS en PNG en utilisant Ghostscript
+const generateThumbnail = (inputEPS, outputImage) => new Promise((resolve, reject) => {
+  // Commande Ghostscript pour convertir la première page de l'EPS en PNG
+  const cmd = `gs -dNOPAUSE -dBATCH -sDEVICE=pngalpha -r150 -dFirstPage=1 -dLastPage=1 -sOutputFile="${outputImage}" "${inputEPS}"`;
+  exec(cmd, (error, stdout, stderr) => {
+    if (error) {
+      console.error("Erreur lors de la génération du thumbnail :", stderr);
+      return reject(new Error("Échec génération thumbnail"));
+    }
+    resolve(outputImage);
+  });
+});
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
+
 
 // Base URL de votre service Render
 const baseUrl = process.env.BASE_URL || "https://analyse-fichiers-clean.onrender.com";
