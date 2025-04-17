@@ -176,9 +176,9 @@ if (Array.isArray(pageData["/TrimBox"])) {
         height_mm: toMM(y2 - y1)
       };
 
-           res.json({ dimensions, usedBox });
+           
      // On renvoie aussi pageCount
-     res.json({ dimensions, usedBox, pageCount });
+     return res.json({ dimensions, usedBox, pageCount });
 
     } catch (parseErr) {
       console.error('Erreur parsing JSON qpdf:', parseErr);
