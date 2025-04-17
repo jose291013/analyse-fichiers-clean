@@ -133,8 +133,8 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
 
     try {
       const json = JSON.parse(stdout);
-+     // Nombre total de pages
-+     const pageCount = Array.isArray(json.pages) ? json.pages.length : 0;
+     // Nombre total de pages
+     const pageCount = Array.isArray(json.pages) ? json.pages.length : 0;
 
       const pageRef = json.pages?.[0]?.object;
       if (!pageRef) return res.status(500).json({ error: 'Référence page introuvable' });
