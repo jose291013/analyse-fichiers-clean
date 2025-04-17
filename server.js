@@ -133,6 +133,8 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
 
     try {
       const json = JSON.parse(stdout);
++     // Nombre total de pages
++     const pageCount = Array.isArray(json.pages) ? json.pages.length : 0;
 
       const pageRef = json.pages?.[0]?.object;
       if (!pageRef) return res.status(500).json({ error: 'Référence page introuvable' });
@@ -174,7 +176,9 @@ if (Array.isArray(pageData["/TrimBox"])) {
         height_mm: toMM(y2 - y1)
       };
 
-      res.json({ dimensions, usedBox });
+      -     res.json({ dimensions, usedBox });
++     // On renvoie aussi pageCount
++     res.json({ dimensions, usedBox, pageCount });
 
     } catch (parseErr) {
       console.error('Erreur parsing JSON qpdf:', parseErr);
