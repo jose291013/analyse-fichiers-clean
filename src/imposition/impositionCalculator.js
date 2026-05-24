@@ -27,6 +27,7 @@ function normalizePaperSizes(paperSizes) {
         heightMm,
         cost: Number.isFinite(Number(paper.cost)) ? Number(paper.cost) : null,
         priority: Number.isFinite(Number(paper.priority)) ? Number(paper.priority) : index,
+        mediaKey: paper.mediaKey || paper.media_key || null,
       };
     })
     .filter(Boolean);
@@ -51,6 +52,22 @@ function getSheetOrientations(paper, allowSheetRotation) {
   }
 
   return orientations;
+}
+
+function sheetFitsMachine(sheet, constraints = {}) {
+  const maxWidthMm = toPositiveNumber(constraints.maxSheetWidthMm ?? constraints.max_sheet_width_mm, 0);
+  const maxHeightMm = toPositiveNumber(constraints.maxSheetHeightMm ?? constraints.max_sheet_height_mm, 0);
+
+  if (!maxWidthMm || !maxHeightMm) return { fits: true };
+
+  const direct = sheet.sheetWidthMm <= maxWidthMm && sheet.sheetHeightMm <= maxHeightMm;
+  const rotated = sheet.sheetHeightMm <= maxWidthMm && sheet.sheetWidthMm <= maxHeightMm;
+  if (direct || rotated) return { fits: true };
+
+  return {
+    fits: false,
+    reason: `Format feuille ${sheet.sheetWidthMm} × ${sheet.sheetHeightMm} mm supérieur au maximum machine ${maxWidthMm} × ${maxHeightMm} mm.`,
+  };
 }
 
 function buildPlacements({ columns, rows, cellWidthMm, cellHeightMm, sheetWidthMm, sheetHeightMm, gutterMm, productRotation }) {
@@ -84,18 +101,33 @@ function buildPlacements({ columns, rows, cellWidthMm, cellHeightMm, sheetWidthM
   return { gridWidthMm: round(gridWidthMm, 3), gridHeightMm: round(gridHeightMm, 3), placements };
 }
 
-function evaluateCandidate({ paper, sheet, product, params, productRotation }) {
+function evaluateCandidate({ paper, sheet, product, params, productRotation, machineConstraints }) {
+  const machineFit = sheetFitsMachine(sheet, machineConstraints);
+  if (!machineFit.fits) {
+    return { compatible: false, reason: machineFit.reason };
+  }
+
   const cellWidthMm = productRotation === 90 ? product.heightMm : product.widthMm;
   const cellHeightMm = productRotation === 90 ? product.widthMm : product.heightMm;
   const usableWidthMm = sheet.sheetWidthMm - 2 * params.marginMm;
   const usableHeightMm = sheet.sheetHeightMm - 2 * params.marginMm;
 
-  if (usableWidthMm <= 0 || usableHeightMm <= 0) return null;
+  if (usableWidthMm <= 0 || usableHeightMm <= 0) {
+    return {
+      compatible: false,
+      reason: `Marge ${params.marginMm} mm trop grande pour la feuille ${sheet.sheetWidthMm} × ${sheet.sheetHeightMm} mm.`,
+    };
+  }
 
   const columns = Math.floor((usableWidthMm + params.gutterMm) / (cellWidthMm + params.gutterMm));
   const rows = Math.floor((usableHeightMm + params.gutterMm) / (cellHeightMm + params.gutterMm));
 
-  if (columns <= 0 || rows <= 0) return null;
+  if (columns <= 0 || rows <= 0) {
+    return {
+      compatible: false,
+      reason: `Le produit ${cellWidthMm} × ${cellHeightMm} mm ne rentre pas dans la zone utile ${round(usableWidthMm, 2)} × ${round(usableHeightMm, 2)} mm.`,
+    };
+  }
 
   const totalPoses = columns * rows;
   const sheetAreaMm2 = sheet.sheetWidthMm * sheet.sheetHeightMm;
@@ -105,31 +137,35 @@ function evaluateCandidate({ paper, sheet, product, params, productRotation }) {
   const grid = buildPlacements({ columns, rows, cellWidthMm, cellHeightMm, sheetWidthMm: sheet.sheetWidthMm, sheetHeightMm: sheet.sheetHeightMm, gutterMm: params.gutterMm, productRotation });
 
   return {
-    id: `${paper.id}_${sheet.orientation}_r${productRotation}_${columns}x${rows}`,
-    paperId: paper.id,
-    paperName: paper.name,
-    sheetWidthMm: round(sheet.sheetWidthMm, 3),
-    sheetHeightMm: round(sheet.sheetHeightMm, 3),
-    sheetAreaMm2: round(sheetAreaMm2, 3),
-    orientation: sheet.orientation,
-    productWidthMm: round(product.widthMm, 3),
-    productHeightMm: round(product.heightMm, 3),
-    productRotation,
-    cellWidthMm: round(cellWidthMm, 3),
-    cellHeightMm: round(cellHeightMm, 3),
-    columns,
-    rows,
-    totalPoses,
-    marginMm: round(params.marginMm, 3),
-    gutterMm: round(params.gutterMm, 3),
-    gridWidthMm: grid.gridWidthMm,
-    gridHeightMm: grid.gridHeightMm,
-    usedAreaPercent: round((usedAreaMm2 / sheetAreaMm2) * 100, 2),
-    wasteAreaPercent: round((wasteAreaMm2 / sheetAreaMm2) * 100, 2),
-    cost: paper.cost,
-    costPerPose: paper.cost ? round(paper.cost / totalPoses, 6) : null,
-    paperPriority: paper.priority,
-    placements: grid.placements,
+    compatible: true,
+    candidate: {
+      id: `${paper.id}_${sheet.orientation}_r${productRotation}_${columns}x${rows}`,
+      paperId: paper.id,
+      paperName: paper.name,
+      mediaKey: paper.mediaKey,
+      sheetWidthMm: round(sheet.sheetWidthMm, 3),
+      sheetHeightMm: round(sheet.sheetHeightMm, 3),
+      sheetAreaMm2: round(sheetAreaMm2, 3),
+      orientation: sheet.orientation,
+      productWidthMm: round(product.widthMm, 3),
+      productHeightMm: round(product.heightMm, 3),
+      productRotation,
+      cellWidthMm: round(cellWidthMm, 3),
+      cellHeightMm: round(cellHeightMm, 3),
+      columns,
+      rows,
+      totalPoses,
+      marginMm: round(params.marginMm, 3),
+      gutterMm: round(params.gutterMm, 3),
+      gridWidthMm: grid.gridWidthMm,
+      gridHeightMm: grid.gridHeightMm,
+      usedAreaPercent: round((usedAreaMm2 / sheetAreaMm2) * 100, 2),
+      wasteAreaPercent: round((wasteAreaMm2 / sheetAreaMm2) * 100, 2),
+      cost: paper.cost,
+      costPerPose: paper.cost ? round(paper.cost / totalPoses, 6) : null,
+      paperPriority: paper.priority,
+      placements: grid.placements,
+    }
   };
 }
 
@@ -152,20 +188,41 @@ function compareCandidates(strategy) {
   };
 }
 
-function explainCandidate(candidate, selected) {
-  if (candidate.id === selected.id) return 'Format sélectionné automatiquement.';
+function explainCandidate(candidate, selected, manualPaperId) {
+  if (candidate.id === selected?.id && manualPaperId) return 'Format sélectionné manuellement.';
+  if (candidate.id === selected?.id) return 'Format sélectionné automatiquement.';
+  if (!selected) return 'Compatible, mais non sélectionné.';
   if (candidate.totalPoses < selected.totalPoses) return `Moins de poses que le format sélectionné (${candidate.totalPoses} contre ${selected.totalPoses}).`;
   if (candidate.totalPoses === selected.totalPoses && candidate.sheetAreaMm2 > selected.sheetAreaMm2) return 'Même nombre de poses, mais feuille plus grande.';
   if (candidate.costPerPose !== null && selected.costPerPose !== null && candidate.costPerPose > selected.costPerPose) return 'Même logique de pose, mais coût estimé par pose supérieur.';
-  return 'Non sélectionné après application des règles de tri.';
+  return 'Compatible, mais non sélectionné après application des règles de tri.';
 }
 
-function summarizeCandidate(candidate, selected) {
+function summarizeCandidate(candidate, selected, manualPaperId) {
   const summary = { ...candidate };
   delete summary.placements;
-  summary.selected = candidate.id === selected.id;
-  summary.reason = explainCandidate(candidate, selected);
+  summary.selected = candidate.id === selected?.id;
+  summary.reason = explainCandidate(candidate, selected, manualPaperId);
   return summary;
+}
+
+function bestPerPaper(candidates) {
+  const map = new Map();
+  for (const candidate of candidates) {
+    const current = map.get(candidate.paperId);
+    if (!current) {
+      map.set(candidate.paperId, candidate);
+      continue;
+    }
+    if (compareCandidates('max_poses_then_smallest_sheet')(candidate, current) < 0) {
+      map.set(candidate.paperId, candidate);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function normalizeManualPaperId(options = {}) {
+  return options.paperId || options.paper_id || options.selectedPaperId || options.selected_paper_id || null;
 }
 
 function findBestImposition(options) {
@@ -182,28 +239,57 @@ function findBestImposition(options) {
   const allowRotation = normalizeBoolean(options.allowRotation, true);
   const allowSheetRotation = normalizeBoolean(options.allowSheetRotation, true);
   const product = { widthMm: productWidthMm, heightMm: productHeightMm };
-  const papers = normalizePaperSizes(options.paperSizes);
+  const allPapers = normalizePaperSizes(options.paperSizes);
+  const manualPaperId = normalizeManualPaperId(options);
+  const papers = manualPaperId
+    ? allPapers.filter((paper) => paper.id === manualPaperId || paper.name === manualPaperId)
+    : allPapers;
   const productRotations = allowRotation && productWidthMm !== productHeightMm ? [0, 90] : [0];
   const candidates = [];
+  const notCompatible = [];
 
   for (const paper of papers) {
+    const paperCandidates = [];
+    const paperReasons = [];
+
     for (const sheet of getSheetOrientations(paper, allowSheetRotation)) {
       for (const productRotation of productRotations) {
-        const candidate = evaluateCandidate({ paper, sheet, product, params, productRotation });
-        if (candidate) candidates.push(candidate);
+        const result = evaluateCandidate({ paper, sheet, product, params, productRotation, machineConstraints: options.machineConstraints || options });
+        if (result.compatible) {
+          paperCandidates.push(result.candidate);
+          candidates.push(result.candidate);
+        } else if (result.reason) {
+          paperReasons.push(`${sheet.orientation}, rotation ${productRotation}° : ${result.reason}`);
+        }
       }
+    }
+
+    if (!paperCandidates.length) {
+      notCompatible.push({
+        paperId: paper.id,
+        paperName: paper.name,
+        sheetWidthMm: paper.widthMm,
+        sheetHeightMm: paper.heightMm,
+        mediaKey: paper.mediaKey,
+        reason: paperReasons[0] || 'Aucune orientation compatible.',
+        reasons: paperReasons,
+      });
     }
   }
 
   candidates.sort(compareCandidates(strategy));
-  if (!candidates.length) return { selected: null, candidates: [], summaries: [], strategy };
+  const selected = candidates.length ? candidates[0] : null;
+  const compatiblePaperCandidates = bestPerPaper(candidates).sort(compareCandidates(strategy));
 
-  const selected = candidates[0];
   return {
     selected,
     candidates,
-    summaries: candidates.map((candidate) => summarizeCandidate(candidate, selected)),
+    summaries: candidates.map((candidate) => summarizeCandidate(candidate, selected, manualPaperId)),
+    compatiblePapers: compatiblePaperCandidates.map((candidate) => summarizeCandidate(candidate, selected, manualPaperId)),
+    notCompatible,
     strategy,
+    paperSelectionMode: manualPaperId ? 'manual' : 'auto',
+    paperId: manualPaperId,
   };
 }
 
