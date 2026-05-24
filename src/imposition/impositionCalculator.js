@@ -11,6 +11,14 @@ function normalizeBoolean(value, fallback = true) {
   return fallback;
 }
 
+function normalizeStrategy(value) {
+  const strategy = String(value || '').trim().toLowerCase();
+  if (['lowest_cost_per_copy', 'max_poses_then_smallest_sheet', 'digital_click_optimized'].includes(strategy)) {
+    return strategy;
+  }
+  return 'digital_click_optimized';
+}
+
 function normalizePaperSizes(paperSizes) {
   const source = Array.isArray(paperSizes) && paperSizes.length ? paperSizes : DEFAULT_PAPER_SIZES;
 
@@ -134,6 +142,7 @@ function evaluateCandidate({ paper, sheet, product, params, productRotation, mac
   const productAreaMm2 = product.widthMm * product.heightMm;
   const usedAreaMm2 = totalPoses * productAreaMm2;
   const wasteAreaMm2 = Math.max(0, sheetAreaMm2 - usedAreaMm2);
+  const estimatedSheets = params.quantity ? Math.ceil(params.quantity / totalPoses) : null;
   const grid = buildPlacements({ columns, rows, cellWidthMm, cellHeightMm, sheetWidthMm: sheet.sheetWidthMm, sheetHeightMm: sheet.sheetHeightMm, gutterMm: params.gutterMm, productRotation });
 
   return {
@@ -164,6 +173,9 @@ function evaluateCandidate({ paper, sheet, product, params, productRotation, mac
       cost: paper.cost,
       costPerPose: paper.cost ? round(paper.cost / totalPoses, 6) : null,
       paperPriority: paper.priority,
+      quantity: params.quantity || null,
+      estimatedSheets,
+      estimatedClicks: estimatedSheets,
       placements: grid.placements,
     }
   };
@@ -177,6 +189,9 @@ function compareCandidates(strategy) {
       if (aCost !== bCost) return aCost - bCost;
       if (b.totalPoses !== a.totalPoses) return b.totalPoses - a.totalPoses;
     } else {
+      const aClicks = Number.isFinite(Number(a.estimatedClicks)) ? Number(a.estimatedClicks) : null;
+      const bClicks = Number.isFinite(Number(b.estimatedClicks)) ? Number(b.estimatedClicks) : null;
+      if (aClicks !== null && bClicks !== null && aClicks !== bClicks) return aClicks - bClicks;
       if (b.totalPoses !== a.totalPoses) return b.totalPoses - a.totalPoses;
       if (a.sheetAreaMm2 !== b.sheetAreaMm2) return a.sheetAreaMm2 - b.sheetAreaMm2;
     }
@@ -188,25 +203,27 @@ function compareCandidates(strategy) {
   };
 }
 
-function explainCandidate(candidate, selected, manualPaperId) {
+function explainCandidate(candidate, selected, manualPaperId, strategy) {
   if (candidate.id === selected?.id && manualPaperId) return 'Format sélectionné manuellement.';
+  if (candidate.id === selected?.id && strategy === 'digital_click_optimized') return 'Format sélectionné pour réduire les clics machine, puis limiter la gâche à poses équivalentes.';
   if (candidate.id === selected?.id) return 'Format sélectionné automatiquement.';
   if (!selected) return 'Compatible, mais non sélectionné.';
-  if (candidate.totalPoses < selected.totalPoses) return `Moins de poses que le format sélectionné (${candidate.totalPoses} contre ${selected.totalPoses}).`;
-  if (candidate.totalPoses === selected.totalPoses && candidate.sheetAreaMm2 > selected.sheetAreaMm2) return 'Même nombre de poses, mais feuille plus grande.';
+  if (candidate.estimatedClicks !== null && selected.estimatedClicks !== null && candidate.estimatedClicks > selected.estimatedClicks) return `Plus de clics machine estimés que le format sélectionné (${candidate.estimatedClicks} contre ${selected.estimatedClicks}).`;
+  if (candidate.totalPoses < selected.totalPoses) return `Moins de poses que le format sélectionné (${candidate.totalPoses} contre ${selected.totalPoses}), donc plus de passages machine.`;
+  if (candidate.totalPoses === selected.totalPoses && candidate.sheetAreaMm2 > selected.sheetAreaMm2) return 'Même nombre de poses, mais feuille plus grande donc plus de gâche papier.';
   if (candidate.costPerPose !== null && selected.costPerPose !== null && candidate.costPerPose > selected.costPerPose) return 'Même logique de pose, mais coût estimé par pose supérieur.';
   return 'Compatible, mais non sélectionné après application des règles de tri.';
 }
 
-function summarizeCandidate(candidate, selected, manualPaperId) {
+function summarizeCandidate(candidate, selected, manualPaperId, strategy) {
   const summary = { ...candidate };
   delete summary.placements;
   summary.selected = candidate.id === selected?.id;
-  summary.reason = explainCandidate(candidate, selected, manualPaperId);
+  summary.reason = explainCandidate(candidate, selected, manualPaperId, strategy);
   return summary;
 }
 
-function bestPerPaper(candidates) {
+function bestPerPaper(candidates, strategy) {
   const map = new Map();
   for (const candidate of candidates) {
     const current = map.get(candidate.paperId);
@@ -214,7 +231,7 @@ function bestPerPaper(candidates) {
       map.set(candidate.paperId, candidate);
       continue;
     }
-    if (compareCandidates('max_poses_then_smallest_sheet')(candidate, current) < 0) {
+    if (compareCandidates(strategy || 'digital_click_optimized')(candidate, current) < 0) {
       map.set(candidate.paperId, candidate);
     }
   }
@@ -233,9 +250,10 @@ function findBestImposition(options) {
   const params = {
     marginMm: toNonNegativeNumber(options.marginMm, 10),
     gutterMm: toNonNegativeNumber(options.gutterMm, 5),
+    quantity: toPositiveNumber(options.quantity ?? options.qty ?? options.runQuantity ?? options.run_quantity, 0),
   };
 
-  const strategy = options.strategy || 'max_poses_then_smallest_sheet';
+  const strategy = normalizeStrategy(options.strategy);
   const allowRotation = normalizeBoolean(options.allowRotation, true);
   const allowSheetRotation = normalizeBoolean(options.allowSheetRotation, true);
   const product = { widthMm: productWidthMm, heightMm: productHeightMm };
@@ -279,13 +297,13 @@ function findBestImposition(options) {
 
   candidates.sort(compareCandidates(strategy));
   const selected = candidates.length ? candidates[0] : null;
-  const compatiblePaperCandidates = bestPerPaper(candidates).sort(compareCandidates(strategy));
+  const compatiblePaperCandidates = bestPerPaper(candidates, strategy).sort(compareCandidates(strategy));
 
   return {
     selected,
     candidates,
-    summaries: candidates.map((candidate) => summarizeCandidate(candidate, selected, manualPaperId)),
-    compatiblePapers: compatiblePaperCandidates.map((candidate) => summarizeCandidate(candidate, selected, manualPaperId)),
+    summaries: candidates.map((candidate) => summarizeCandidate(candidate, selected, manualPaperId, strategy)),
+    compatiblePapers: compatiblePaperCandidates.map((candidate) => summarizeCandidate(candidate, selected, manualPaperId, strategy)),
     notCompatible,
     strategy,
     paperSelectionMode: manualPaperId ? 'manual' : 'auto',
