@@ -41,6 +41,11 @@ function registerImpositionRoutes(app) {
         allowRotation: body.allowRotation,
         allowSheetRotation: body.allowSheetRotation,
         strategy: body.strategy,
+        paperId: body.paperId || body.paper_id || body.selectedPaperId,
+        machineConstraints: body.machineConstraints || body.machine_constraints || {
+          maxSheetWidthMm: body.maxSheetWidthMm || body.max_sheet_width_mm,
+          maxSheetHeightMm: body.maxSheetHeightMm || body.max_sheet_height_mm,
+        },
       });
 
       if (!result.selected) {
@@ -48,6 +53,10 @@ function registerImpositionRoutes(app) {
           success: false,
           error: 'Aucun format papier disponible ne permet de placer ce format avec les paramètres fournis.',
           strategy: result.strategy,
+          paperSelectionMode: result.paperSelectionMode,
+          paperId: result.paperId,
+          compatiblePapers: result.compatiblePapers,
+          notCompatible: result.notCompatible,
         });
       }
 
@@ -63,8 +72,12 @@ function registerImpositionRoutes(app) {
           trimHeightMm: Number(productHeightMm),
         },
         strategy: result.strategy,
+        paperSelectionMode: result.paperSelectionMode,
+        paperId: result.paperId,
         selected: result.selected,
         candidates: result.summaries,
+        compatiblePapers: result.compatiblePapers,
+        notCompatible: result.notCompatible,
         previewSvg,
       });
     } catch (error) {
