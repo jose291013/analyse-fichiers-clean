@@ -3,6 +3,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { PDFDocument, rgb, degrees } = require('pdf-lib');
 const { mmToPt } = require('./units');
+const { isImpositionPlan } = require('./impositionPlan');
 
 const IMPOSED_DIR = path.join(process.cwd(), 'imposed');
 
@@ -146,18 +147,8 @@ function validateLayout(layout) {
   }
 }
 
-async function generateImposedPdf({ sourcePdfUrl, sourcePdfPath, layout, outputFileName, addCropMarks = true }) {
+async function drawLayoutOnOutputPage({ outputPdf, targetPage, sourceBytes, sourcePdf, layout, embeddedPageCache, addCropMarks }) {
   validateLayout(layout);
-
-  const sourceBytes = await readSourcePdfBytes({ sourcePdfUrl, sourcePdfPath });
-  const sourcePdf = await PDFDocument.load(sourceBytes, { ignoreEncryption: true });
-  const outputPdf = await PDFDocument.create();
-
-  const sheetWidthPt = mmToPt(layout.sheetWidthMm);
-  const sheetHeightPt = mmToPt(layout.sheetHeightMm);
-  const targetPage = outputPdf.addPage([sheetWidthPt, sheetHeightPt]);
-
-  const embeddedPageCache = new Map();
 
   for (const placement of layout.placements) {
     const sourcePageIndex = Number.isInteger(placement.sourcePageIndex) ? placement.sourcePageIndex : 0;
@@ -173,6 +164,33 @@ async function generateImposedPdf({ sourcePdfUrl, sourcePdfPath, layout, outputF
     drawEmbeddedPage(targetPage, embeddedPageCache.get(sourcePageIndex), placement);
     if (addCropMarks) drawCropMarks(targetPage, placement);
   }
+}
+
+async function generateImposedPdf({ sourcePdfUrl, sourcePdfPath, layout, outputFileName, addCropMarks = true }) {
+  const sourceBytes = await readSourcePdfBytes({ sourcePdfUrl, sourcePdfPath });
+  const sourcePdf = await PDFDocument.load(sourceBytes, { ignoreEncryption: true });
+  const outputPdf = await PDFDocument.create();
+  const embeddedPageCache = new Map();
+
+  const layouts = isImpositionPlan(layout) ? layout.faces : [layout];
+  if (!layouts.length) throw new Error('Aucun layout à générer.');
+
+  for (const faceLayout of layouts) {
+    validateLayout(faceLayout);
+    const sheetWidthPt = mmToPt(faceLayout.sheetWidthMm);
+    const sheetHeightPt = mmToPt(faceLayout.sheetHeightMm);
+    const targetPage = outputPdf.addPage([sheetWidthPt, sheetHeightPt]);
+
+    await drawLayoutOnOutputPage({
+      outputPdf,
+      targetPage,
+      sourceBytes,
+      sourcePdf,
+      layout: faceLayout,
+      embeddedPageCache,
+      addCropMarks,
+    });
+  }
 
   const pdfBytes = await outputPdf.save({ useObjectStreams: false });
   const outputPath = uniqueOutputPath(outputFileName);
@@ -183,6 +201,8 @@ async function generateImposedPdf({ sourcePdfUrl, sourcePdfPath, layout, outputF
     fileName: path.basename(outputPath),
     fileSizeBytes: pdfBytes.length,
     pageCount: outputPdf.getPageCount(),
+    sourcePageCount: sourcePdf.getPageCount(),
+    generatedFaces: layouts.length,
   };
 }
 
