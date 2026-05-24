@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { registerImpositionRoutes } = require('./src/imposition/routes');
+const { summarizePdfPageBoxes } = require('./src/imposition/pdfBoxSummary');
 
 // Fonction pour générer une miniature d'un EPS en PNG en utilisant Ghostscript
 // Fonction pour générer une miniature d'un EPS en PNG recadré (rogne l'espace blanc)
@@ -18,15 +19,15 @@ const generateThumbnail = (inputEPS, outputImage) => new Promise((resolve, rejec
   const gsCommand = `gs -dNOPAUSE -dBATCH -dEPSCrop -sDEVICE=pngalpha -r150 -dFirstPage=1 -dLastPage=1 -sOutputFile="${tempImage}" "${inputEPS}"`;
   exec(gsCommand, (error, stdout, stderr) => {
     if (error) {
-      console.error("Erreur Ghostscript:", stderr);
-      return reject(new Error("Échec génération temporaire du thumbnail"));
+      console.error('Erreur Ghostscript:', stderr);
+      return reject(new Error('Échec génération temporaire du thumbnail'));
     }
     // Étape 2 : Rogner le PNG temporaire avec ImageMagick pour supprimer les espaces blancs
     const convertCommand = `convert "${tempImage}" -trim +repage "${outputImage}" && rm "${tempImage}"`;
     exec(convertCommand, (err2, stdout2, stderr2) => {
       if (err2) {
-        console.error("Erreur ImageMagick:", stderr2);
-        return reject(new Error("Échec du trimming avec ImageMagick"));
+        console.error('Erreur ImageMagick:', stderr2);
+        return reject(new Error('Échec du trimming avec ImageMagick'));
       }
       resolve(outputImage);
     });
@@ -43,7 +44,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 
 // Base URL de votre service Render
-const baseUrl = process.env.BASE_URL || "https://analyse-fichiers-clean.onrender.com";
+const baseUrl = process.env.BASE_URL || 'https://analyse-fichiers-clean.onrender.com';
 
 // Configuration des répertoires
 const directories = [
@@ -56,7 +57,7 @@ directories.forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-const upload = multer({ 
+const upload = multer({
   dest: 'uploads/',
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB max
 });
@@ -121,7 +122,7 @@ const convertEPStoPDF = (inputEPS) => new Promise((resolve, reject) => {
   });
 });
 
-// 4. Analyse PDF avec qpdf pour lire le TrimBox ou MediaBox
+// 4. Analyse PDF avec qpdf pour lire les boxes et le fond perdu
 app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
@@ -129,7 +130,7 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
   const command = `qpdf --json "${filePath}"`;
 
   exec(command, (err, stdout, stderr) => {
-    fs.unlinkSync(filePath); // Nettoyage du fichier temporaire
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
 
     if (err) {
       console.error('Erreur qpdf :', stderr);
@@ -138,18 +139,14 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
 
     try {
       const json = JSON.parse(stdout);
-     // Nombre total de pages
-     const pageCount = Array.isArray(json.pages) ? json.pages.length : 0;
-
+      const pageCount = Array.isArray(json.pages) ? json.pages.length : 0;
       const pageRef = json.pages?.[0]?.object;
       if (!pageRef) return res.status(500).json({ error: 'Référence page introuvable' });
 
       let pageData;
-
-      // ✅ Correction : parcourir tous les objets de json.qpdf
-      for (const obj of json.qpdf) {
+      for (const obj of json.qpdf || []) {
         const key = `obj:${pageRef}`;
-        if (obj[key]) {
+        if (obj[key]?.value) {
           pageData = obj[key].value;
           break;
         }
@@ -158,33 +155,16 @@ app.post('/analyze-pdf', upload.single('FILE'), (req, res) => {
       if (!pageData) {
         return res.status(500).json({ error: 'Objet page introuvable dans qpdf' });
       }
-      console.log("🧩 Contenu brut de pageData :");
-      console.log(JSON.stringify(pageData, null, 2));
-      
-      let box, usedBox;
-if (Array.isArray(pageData["/TrimBox"])) {
-  box = pageData["/TrimBox"];
-  usedBox = 'TrimBox';
-} else if (Array.isArray(pageData["/MediaBox"])) {
-  box = pageData["/MediaBox"];
-  usedBox = 'MediaBox';
-} else {
-  return res.status(500).json({ error: 'Aucune box valide trouvée dans le PDF' });
-}
 
+      const summary = summarizePdfPageBoxes(pageData);
 
-      const [x1, y1, x2, y2] = box;
-      const toMM = pt => +(pt * 25.4 / 72).toFixed(2);
-
-      const dimensions = {
-        width_mm: toMM(x2 - x1),
-        height_mm: toMM(y2 - y1)
-      };
-
-           
-     // On renvoie aussi pageCount
-     return res.json({ dimensions, usedBox, pageCount });
-
+      return res.json({
+        dimensions: summary.dimensions,
+        usedBox: summary.usedBox,
+        pageCount,
+        boxes: summary.boxes,
+        bleed: summary.bleed
+      });
     } catch (parseErr) {
       console.error('Erreur parsing JSON qpdf:', parseErr);
       res.status(500).json({ error: 'Erreur parsing JSON qpdf' });
