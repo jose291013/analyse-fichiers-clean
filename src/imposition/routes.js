@@ -54,6 +54,7 @@ function registerImpositionRoutes(app) {
         paperSizes: parsePaperSizes(body.paperSizes),
         marginMm: body.marginMm,
         gutterMm: body.gutterMm,
+        quantity: body.quantity ?? body.qty ?? body.runQuantity ?? body.run_quantity,
         allowRotation: body.allowRotation,
         allowSheetRotation: body.allowSheetRotation,
         strategy: body.strategy,
