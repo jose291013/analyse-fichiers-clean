@@ -41,6 +41,14 @@ function normalizePaperSizes(paperSizes) {
     .filter(Boolean);
 }
 
+function reason(code, message, params = {}) {
+  return {
+    reasonCode: code,
+    reasonParams: params,
+    reason: message
+  };
+}
+
 function getSheetOrientations(paper, allowSheetRotation) {
   const firstOrientation = paper.widthMm <= paper.heightMm ? 'portrait' : 'landscape';
   const orientations = [
@@ -74,7 +82,16 @@ function sheetFitsMachine(sheet, constraints = {}) {
 
   return {
     fits: false,
-    reason: `Format feuille ${sheet.sheetWidthMm} × ${sheet.sheetHeightMm} mm supérieur au maximum machine ${maxWidthMm} × ${maxHeightMm} mm.`,
+    ...reason(
+      'SHEET_EXCEEDS_MACHINE',
+      `Format feuille ${sheet.sheetWidthMm} × ${sheet.sheetHeightMm} mm supérieur au maximum machine ${maxWidthMm} × ${maxHeightMm} mm.`,
+      {
+        sheetWidth: round(sheet.sheetWidthMm, 3),
+        sheetHeight: round(sheet.sheetHeightMm, 3),
+        maxWidth: round(maxWidthMm, 3),
+        maxHeight: round(maxHeightMm, 3)
+      }
+    )
   };
 }
 
@@ -112,7 +129,12 @@ function buildPlacements({ columns, rows, cellWidthMm, cellHeightMm, sheetWidthM
 function evaluateCandidate({ paper, sheet, product, params, productRotation, machineConstraints }) {
   const machineFit = sheetFitsMachine(sheet, machineConstraints);
   if (!machineFit.fits) {
-    return { compatible: false, reason: machineFit.reason };
+    return {
+      compatible: false,
+      reason: machineFit.reason,
+      reasonCode: machineFit.reasonCode,
+      reasonParams: machineFit.reasonParams
+    };
   }
 
   const cellWidthMm = productRotation === 90 ? product.heightMm : product.widthMm;
@@ -121,20 +143,32 @@ function evaluateCandidate({ paper, sheet, product, params, productRotation, mac
   const usableHeightMm = sheet.sheetHeightMm - 2 * params.marginMm;
 
   if (usableWidthMm <= 0 || usableHeightMm <= 0) {
-    return {
-      compatible: false,
-      reason: `Marge ${params.marginMm} mm trop grande pour la feuille ${sheet.sheetWidthMm} × ${sheet.sheetHeightMm} mm.`,
-    };
+    const details = reason(
+      'MARGIN_TOO_LARGE',
+      `Marge ${params.marginMm} mm trop grande pour la feuille ${sheet.sheetWidthMm} × ${sheet.sheetHeightMm} mm.`,
+      {
+        margin: round(params.marginMm, 3),
+        sheetWidth: round(sheet.sheetWidthMm, 3),
+        sheetHeight: round(sheet.sheetHeightMm, 3)
+      }
+    );
+    return { compatible: false, ...details };
   }
 
   const columns = Math.floor((usableWidthMm + params.gutterMm) / (cellWidthMm + params.gutterMm));
   const rows = Math.floor((usableHeightMm + params.gutterMm) / (cellHeightMm + params.gutterMm));
 
   if (columns <= 0 || rows <= 0) {
-    return {
-      compatible: false,
-      reason: `Le produit ${cellWidthMm} × ${cellHeightMm} mm ne rentre pas dans la zone utile ${round(usableWidthMm, 2)} × ${round(usableHeightMm, 2)} mm.`,
-    };
+    const productWidth = round(cellWidthMm, 3);
+    const productHeight = round(cellHeightMm, 3);
+    const usableWidth = round(usableWidthMm, 2);
+    const usableHeight = round(usableHeightMm, 2);
+    const details = reason(
+      'PRODUCT_DOES_NOT_FIT_USABLE_AREA',
+      `Le produit ${productWidth} × ${productHeight} mm ne rentre pas dans la zone utile ${usableWidth} × ${usableHeight} mm.`,
+      { productWidth, productHeight, usableWidth, usableHeight }
+    );
+    return { compatible: false, ...details };
   }
 
   const totalPoses = columns * rows;
@@ -204,22 +238,49 @@ function compareCandidates(strategy) {
 }
 
 function explainCandidate(candidate, selected, manualPaperId, strategy) {
-  if (candidate.id === selected?.id && manualPaperId) return 'Format sélectionné manuellement.';
-  if (candidate.id === selected?.id && strategy === 'digital_click_optimized') return 'Format sélectionné pour réduire les clics machine, puis limiter la gâche à poses équivalentes.';
-  if (candidate.id === selected?.id) return 'Format sélectionné automatiquement.';
-  if (!selected) return 'Compatible, mais non sélectionné.';
-  if (candidate.estimatedClicks !== null && selected.estimatedClicks !== null && candidate.estimatedClicks > selected.estimatedClicks) return `Plus de clics machine estimés que le format sélectionné (${candidate.estimatedClicks} contre ${selected.estimatedClicks}).`;
-  if (candidate.totalPoses < selected.totalPoses) return `Moins de poses que le format sélectionné (${candidate.totalPoses} contre ${selected.totalPoses}), donc plus de passages machine.`;
-  if (candidate.totalPoses === selected.totalPoses && candidate.sheetAreaMm2 > selected.sheetAreaMm2) return 'Même nombre de poses, mais feuille plus grande donc plus de gâche papier.';
-  if (candidate.costPerPose !== null && selected.costPerPose !== null && candidate.costPerPose > selected.costPerPose) return 'Même logique de pose, mais coût estimé par pose supérieur.';
-  return 'Compatible, mais non sélectionné après application des règles de tri.';
+  if (candidate.id === selected?.id && manualPaperId) {
+    return reason('MANUAL_SELECTED', 'Format sélectionné manuellement.');
+  }
+  if (candidate.id === selected?.id && strategy === 'digital_click_optimized') {
+    return reason('DIGITAL_CLICK_OPTIMIZED_SELECTED', 'Format sélectionné pour réduire les clics machine, puis limiter la gâche à poses équivalentes.');
+  }
+  if (candidate.id === selected?.id) {
+    return reason('AUTO_SELECTED', 'Format sélectionné automatiquement.');
+  }
+  if (!selected) {
+    return reason('COMPATIBLE_NOT_SELECTED', 'Compatible, mais non sélectionné.');
+  }
+  if (candidate.estimatedClicks !== null && selected.estimatedClicks !== null && candidate.estimatedClicks > selected.estimatedClicks) {
+    return reason(
+      'MORE_CLICKS_THAN_SELECTED',
+      `Plus de clics machine estimés que le format sélectionné (${candidate.estimatedClicks} contre ${selected.estimatedClicks}).`,
+      { candidate: candidate.estimatedClicks, selected: selected.estimatedClicks }
+    );
+  }
+  if (candidate.totalPoses < selected.totalPoses) {
+    return reason(
+      'LESS_POSES_THAN_SELECTED',
+      `Moins de poses que le format sélectionné (${candidate.totalPoses} contre ${selected.totalPoses}), donc plus de passages machine.`,
+      { candidate: candidate.totalPoses, selected: selected.totalPoses }
+    );
+  }
+  if (candidate.totalPoses === selected.totalPoses && candidate.sheetAreaMm2 > selected.sheetAreaMm2) {
+    return reason('SAME_POSES_LARGER_SHEET', 'Même nombre de poses, mais feuille plus grande donc plus de gâche papier.');
+  }
+  if (candidate.costPerPose !== null && selected.costPerPose !== null && candidate.costPerPose > selected.costPerPose) {
+    return reason('HIGHER_COST_PER_POSE', 'Même logique de pose, mais coût estimé par pose supérieur.');
+  }
+  return reason('COMPATIBLE_SORTED_OUT', 'Compatible, mais non sélectionné après application des règles de tri.');
 }
 
 function summarizeCandidate(candidate, selected, manualPaperId, strategy) {
   const summary = { ...candidate };
   delete summary.placements;
   summary.selected = candidate.id === selected?.id;
-  summary.reason = explainCandidate(candidate, selected, manualPaperId, strategy);
+  const explanation = explainCandidate(candidate, selected, manualPaperId, strategy);
+  summary.reason = explanation.reason;
+  summary.reasonCode = explanation.reasonCode;
+  summary.reasonParams = explanation.reasonParams;
   return summary;
 }
 
@@ -277,19 +338,28 @@ function findBestImposition(options) {
           paperCandidates.push(result.candidate);
           candidates.push(result.candidate);
         } else if (result.reason) {
-          paperReasons.push(`${sheet.orientation}, rotation ${productRotation}° : ${result.reason}`);
+          paperReasons.push({
+            orientation: sheet.orientation,
+            productRotation,
+            reason: `${sheet.orientation}, rotation ${productRotation}° : ${result.reason}`,
+            reasonCode: result.reasonCode,
+            reasonParams: result.reasonParams
+          });
         }
       }
     }
 
     if (!paperCandidates.length) {
+      const firstReason = paperReasons[0] || reason('NO_COMPATIBLE_ORIENTATION', 'Aucune orientation compatible.');
       notCompatible.push({
         paperId: paper.id,
         paperName: paper.name,
         sheetWidthMm: paper.widthMm,
         sheetHeightMm: paper.heightMm,
         mediaKey: paper.mediaKey,
-        reason: paperReasons[0] || 'Aucune orientation compatible.',
+        reason: firstReason.reason,
+        reasonCode: firstReason.reasonCode,
+        reasonParams: firstReason.reasonParams,
         reasons: paperReasons,
       });
     }
